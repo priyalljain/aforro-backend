@@ -1,0 +1,125 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: aforro_db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-aforro}
+      POSTGRES_USER: ${DB_USER:-aforro}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-aforro}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aforro_network
+
+  # Redis Cache & Message Broker
+  redis:
+    image: redis:7-alpine
+    container_name: aforro_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aforro_network
+
+  # Django Web Application
+  web:
+    build: .
+    container_name: aforro_web
+    command: >
+      sh -c "
+      python manage.py migrate &&
+      gunicorn core.wsgi:application --bind 0.0.0.0:8000 --workers 4 --timeout 120
+      "
+    environment:
+      DEBUG: ${DEBUG:-False}
+      SECRET_KEY: ${SECRET_KEY:-django-insecure-aforro-dev-key-change-in-production}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: ${DB_NAME:-aforro}
+      DB_USER: ${DB_USER:-aforro}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres_password}
+      DB_HOST: db
+      DB_PORT: 5432
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - aforro_network
+
+  # Celery Worker
+  celery:
+    build: .
+    container_name: aforro_celery
+    command: celery -A core worker --loglevel=info
+    environment:
+      DEBUG: ${DEBUG:-False}
+      SECRET_KEY: ${SECRET_KEY:-django-insecure-aforro-dev-key-change-in-production}
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: ${DB_NAME:-aforro}
+      DB_USER: ${DB_USER:-aforro}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres_password}
+      DB_HOST: db
+      DB_PORT: 5432
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+    volumes:
+      - .:/app
+    depends_on:
+      - db
+      - redis
+      - web
+    networks:
+      - aforro_network
+
+  # Celery Beat Scheduler (Optional)
+  celery-beat:
+    build: .
+    container_name: aforro_celery_beat
+    command: celery -A core beat --loglevel=info
+    environment:
+      DEBUG: ${DEBUG:-False}
+      SECRET_KEY: ${SECRET_KEY:-django-insecure-aforro-dev-key-change-in-production}
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: ${DB_NAME:-aforro}
+      DB_USER: ${DB_USER:-aforro}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres_password}
+      DB_HOST: db
+      DB_PORT: 5432
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+    volumes:
+      - .:/app
+    depends_on:
+      - db
+      - redis
+    networks:
+      - aforro_network
+
+volumes:
+  postgres_data:
+
+networks:
+  aforro_network:
+    driver: bridge
