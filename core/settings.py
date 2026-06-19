@@ -88,16 +88,26 @@ DATABASES = {
 if config('DB_ENGINE', default='') == 'django.db.backends.postgresql':
     is_testing = 'test' in sys.argv
     
-    # Dynamically switch settings for local running vs Docker container
-    db_host = '127.0.0.1' if is_testing else config('DB_HOST')
-    db_user = 'postgres' if is_testing else config('DB_USER')
-    db_password = 'Rolis@619' if is_testing else config('DB_PASSWORD')
+    # Check if the environment variable indicates it's running inside Docker
+    # (By default, docker-compose passes DB_HOST as 'db')
+    running_in_docker = config('DB_HOST', default='') == 'db'
+
+    if is_testing:
+        # If testing inside Docker, use the container network name 'db'
+        # If testing locally outside Docker, use localhost '127.0.0.1'
+        db_host = 'db' if running_in_docker else '127.0.0.1'
+        db_user = config('DB_USER', default='postgres') if running_in_docker else 'postgres'
+        db_password = config('DB_PASSWORD', default='password') if running_in_docker else 'Rolis@619'
+    else:
+        db_host = config('DB_HOST')
+        db_user = config('DB_USER')
+        db_password = config('DB_PASSWORD')
 
     DATABASES['default'] = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': config('DB_NAME'),
-        'USER': db_user,        # Uses 'postgres' superuser for local tests
-        'PASSWORD': db_password,# Uses your local machine's postgres password
+        'USER': db_user,
+        'PASSWORD': db_password,
         'HOST': db_host,
         'PORT': config('DB_PORT', default='5432'),
         'CONN_MAX_AGE': 600,
